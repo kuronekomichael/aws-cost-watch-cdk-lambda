@@ -1,0 +1,39 @@
+{
+  "name": "aws-cost-watch-cdk-lambda",
+  "version": "0.1.0",
+  "private": true,
+  "author": "Koki Nakashima <hardwarehacking@gmail> (https://github.com/kuronekomichael/)",
+  "bin": {
+    "aws-cost-watch-cdk-lambda": "bin/aws-cost-watch-cdk-lambda.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "jest",
+    "cdk": "cdk",
+    "predeploy": "npm run build",
+    "deploy": "cdk deploy"
+  },
+  "devDependencies": {
+    "@aws-cdk/assert": "^1.18.0",
+    "@types/fs-extra": "^8.0.1",
+    "@types/jest": "^24.0.22",
+    "@types/node": "10.17.5",
+    "aws-cdk": "^1.19.0",
+    "fs-extra": "^8.1.0",
+    "jest": "^24.9.0",
+    "ts-jest": "^24.1.0",
+    "ts-node": "^8.1.0",
+    "tslint": "^5.20.1",
+    "typescript": "~3.7.2"
+  },
+  "dependencies": {
+    "@aws-cdk/aws-events": "^1.19.0",
+    "@aws-cdk/aws-events-targets": "^1.19.0",
+    "@aws-cdk/aws-iam": "^1.19.0",
+    "@aws-cdk/aws-lambda": "^1.19.0",
+    "@aws-cdk/core": "^1.18.0",
+    "easy-currencies": "^1.3.0",
+    "source-map-support": "^0.5.16"
+  }
+}
