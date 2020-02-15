@@ -41,7 +41,63 @@ npm install
 cdk bootstrap --profile ${YOUR_AWS_PROFILE_NAME}
 ```
 
-#### 3. Register Slack WebHook URL to AWS Systems Manager(SSM)
+#### 3. Register IAM that can access the target AWS account
+
+Register to AWS Systems Manager(SSM)
+
+IAM Policy for cost watcher 
+```
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "ce:getCostAndUsage",
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": "iam:ListAccountAliases",
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+```sh
+aws ssm put-parameter \
+    --profile ${YOUR_AWS_PROFILE_NAME} \
+    --type SecureString \
+    --name "/CreatedByCDK/AwsCostWatch/Targets/<aws-account-name>/AccessKeyId" \
+    --value "<your-access-key-id>"
+
+aws ssm put-parameter \
+    --profile ${YOUR_AWS_PROFILE_NAME} \
+    --type SecureString \
+    --name "/CreatedByCDK/AwsCostWatch/Targets/<aws-account-name>/SecretAccessKey" \
+    --value "<your-secret-access-key>"
+```
+
+It is possible to register multiple accounts with different account names
+
+```sh
+aws ssm put-parameter \
+    --profile ${YOUR_AWS_PROFILE_NAME} \
+    --type SecureString \
+    --name "/CreatedByCDK/AwsCostWatch/Targets/Account2/AccessKeyId" \
+    --value "JIO9924lkJSURLKJkfasjdfsaf"
+
+aws ssm put-parameter \
+    --profile ${YOUR_AWS_PROFILE_NAME} \
+    --type SecureString \
+    --name "/CreatedByCDK/AwsCostWatch/Targets/Account2/SecretAccessKey" \
+    --value "KSLJ434TLKWTJSE45325U0SGKIJLRKJ643TLKEAJIGLSG"
+```
+
+
+#### 4. Register Slack WebHook URL
+
+Register to AWS Systems Manager(SSM)
 
 ```sh
 aws ssm put-parameter \

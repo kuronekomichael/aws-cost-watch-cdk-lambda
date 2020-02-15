@@ -1,18 +1,22 @@
-const https = require('https');
-const url = require('url');
-const AWS = require('aws-sdk');
-const {Convert} = require("easy-currencies");
+import * as https from 'https';
+import * as  url from 'url';
+import {CostExplorer, SSM, IAM} from 'aws-sdk';
+import {Convert} from 'easy-currencies';
 
-const getCurrencyJp = async (value: number, unit: string) => {
+/**
+ * Attaches callbacks for the resolution and/or rejection of the Promise.
+ * @param value The callback to execute when the Promise is resolved.
+ * @param unit The callback to execute when the Promise is rejected.
+ * @returns A Promise for the completion of which ever callback is executed.
+ */
+const getCurrencyJp = async (value: number, unit: string): Promise<string> => {
     const jpy = await Convert(value)
         .from(unit)
         .to('JPY');
-       
     const formatter = new Intl.NumberFormat('ja-JP', {
         style: 'currency',
         currency: 'JPY'
     });
-
     return formatter.format(jpy);   
 }
 
@@ -43,17 +47,36 @@ const sayToSlack = async (slackWebHookUrl: string, pretext: string, fields: any[
     });
 };
 
-const getSecureParamFromSSM = async (ssm: any, name: string) => {
+const getSlackWebHookFromSSM = async (ssm: any) => {
     const ssmSecureParam = await ssm.getParameter({
-        Name: name,
+        Name: '/CreatedByCDK/AwsCostWatch/SlackWebHookUrl',
         WithDecryption: true,
     }).promise();
     return ssmSecureParam.Parameter.Value;
 };
 
-const getUnblendedCost = async () => {
+const getAccountsFromSSM = async (ssm: any) => {
+    const ssmSecureParam = await ssm.getParametersByPath({
+        Path: '/CreatedByCDK/AwsCostWatch/Targets',
+        Recursive: true,
+        WithDecryption: true,
+    }).promise();
 
-    const costExplorer = new AWS.CostExplorer({region: 'us-east-1'});
+    return ssmSecureParam.Parameters.reduce((accounts: any, parameter: any) => {
+        const tokens = parameter.Name.split('/');
+        const key = tokens.pop();
+        const name = tokens.pop();
+        console.log(key, name, parameter.Value);
+        if (!accounts[name]) accounts[name] = {};
+
+        accounts[name][key] = parameter.Value;
+
+        return accounts;
+      }, {});;
+};
+
+const getUnblendedCost = async (accessKeyId: string, secretAccessKey: string) => {
+    const costExplorer = new CostExplorer({accessKeyId, secretAccessKey, region: 'us-east-1'});
 
     const dt = new Date();
     const yearMonth = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
@@ -71,14 +94,12 @@ const getUnblendedCost = async () => {
         }],
     };
 
-    const cost = await costExplorer.getCostAndUsage(param).promise();
+    const cost: any = await costExplorer.getCostAndUsage(param).promise();
 
-    const start = cost.ResultsByTime[0].TimePeriod.Start;
-    const end = cost.ResultsByTime[0].TimePeriod.End;
     const costs = cost.ResultsByTime[0].Groups.filter((group: any) => group.Metrics.UnblendedCost.Amount > 0);
 
     const total = costs.reduce((total: number, group: any) => total + parseFloat(group.Metrics.UnblendedCost.Amount), 0)
-    const totalJpy = await getCurrencyJp(total, costs[0].Metrics.UnblendedCost.Unit);
+    const totalJpy: string = await getCurrencyJp(total, costs[0].Metrics.UnblendedCost.Unit);
 
     const jpyList = await Promise.all(costs.map((group: any) => getCurrencyJp(parseFloat(group.Metrics.UnblendedCost.Amount), group.Metrics.UnblendedCost.Unit)));
     const fields = jpyList.map((jpy: any, index: number) => {
@@ -89,8 +110,8 @@ const getUnblendedCost = async () => {
     });
        
     return {
-        start,
-        end,
+        start: cost.ResultsByTime[0].TimePeriod.Start,
+        end: cost.ResultsByTime[0].TimePeriod.End,
         total,
         totalJpy,
         fields
@@ -99,16 +120,21 @@ const getUnblendedCost = async () => {
 
 exports.handler = async () => {
 
-    const ssm = new AWS.SSM();
-    const slackWebHookUrl = await getSecureParamFromSSM(ssm, '/CreatedByCDK/AwsCostWatch/SlackWebHookUrl');
+    const ssm = new SSM();
+    const slackWebHookUrl = await getSlackWebHookFromSSM(ssm);
+    const accounts: Array<any> = await getAccountsFromSSM(ssm);
 
-    const iam = new AWS.IAM();
-    const aliases = await iam.listAccountAliases({}).promise();
-    const accountName = aliases.AccountAliases.join(', ');
+    for (const account of Object.values(accounts)) {
+        const iam = new IAM({
+            accessKeyId: account.AccessKeyId,
+            secretAccessKey: account.SecretAccessKey,
+        });
+        const aliases = await iam.listAccountAliases({}).promise();
+        const accountName = aliases.AccountAliases.join(', ');
 
-    const {start, end, total, totalJpy, fields} = await getUnblendedCost();
+        const {start, end, total, totalJpy, fields} = await getUnblendedCost(account.AccessKeyId, account.SecretAccessKey);
+        const text = `${accountName} @${start}〜${end}\n💰 ${totalJpy} ($${total})`;
 
-    const text = `${accountName} @${start}〜${end}\n💰 ${totalJpy} ($${total})`;
-
-    await sayToSlack(slackWebHookUrl, text, fields);
+        await sayToSlack(slackWebHookUrl, text, fields);
+    }
 };
