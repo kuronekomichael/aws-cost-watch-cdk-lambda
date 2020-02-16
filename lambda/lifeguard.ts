@@ -66,7 +66,6 @@ const getAccountsFromSSM = async (ssm: any) => {
         const tokens = parameter.Name.split('/');
         const key = tokens.pop();
         const name = tokens.pop();
-        console.log(key, name, parameter.Value);
         if (!accounts[name]) accounts[name] = {};
 
         accounts[name][key] = parameter.Value;
