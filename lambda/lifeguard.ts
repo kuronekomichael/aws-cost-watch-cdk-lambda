@@ -1,7 +1,7 @@
 import * as https from 'https';
 import * as  url from 'url';
-import {CostExplorer, SSM, IAM} from 'aws-sdk';
-import {Convert} from 'easy-currencies';
+import { CostExplorer, SSM, IAM } from 'aws-sdk';
+import { Convert } from 'easy-currencies';
 
 /**
  * Attaches callbacks for the resolution and/or rejection of the Promise.
@@ -17,7 +17,7 @@ const getCurrencyJp = async (value: number, unit: string): Promise<string> => {
         style: 'currency',
         currency: 'JPY'
     });
-    return formatter.format(jpy);   
+    return formatter.format(jpy);
 }
 
 const sayToSlack = async (slackWebHookUrl: string, pretext: string, fields: any[]) => {
@@ -29,7 +29,7 @@ const sayToSlack = async (slackWebHookUrl: string, pretext: string, fields: any[
         port: parsedUrl.protocol === 'https:' ? 443 : 80,
         path: parsedUrl.pathname,
         method: 'POST',
-        headers: {'Content-Type': 'application/json'}
+        headers: { 'Content-Type': 'application/json' }
     };
     const postData = {
         color: '#fd8c1e',
@@ -74,12 +74,12 @@ const getAccountsFromSSM = async (ssm: any) => {
     }, {});
 
     return Object.keys(accountsMap)
-      .sort()
-      .map(key => accountsMap[key]);
+        .sort()
+        .map(key => accountsMap[key]);
 };
 
 const getUnblendedCost = async (accessKeyId: string, secretAccessKey: string) => {
-    const costExplorer = new CostExplorer({accessKeyId, secretAccessKey, region: 'us-east-1'});
+    const costExplorer = new CostExplorer({ accessKeyId, secretAccessKey, region: 'us-east-1' });
 
     const dt = new Date();
     const yearMonth = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
@@ -92,8 +92,8 @@ const getUnblendedCost = async (accessKeyId: string, secretAccessKey: string) =>
         Granularity: 'MONTHLY',
         Metrics: ['UnblendedCost'],
         GroupBy: [{
-          Type: 'DIMENSION',
-          Key: 'SERVICE',
+            Type: 'DIMENSION',
+            Key: 'SERVICE',
         }],
     };
 
@@ -111,7 +111,7 @@ const getUnblendedCost = async (accessKeyId: string, secretAccessKey: string) =>
             value: `${jpy} ($${costs[index].Metrics.UnblendedCost.Amount})`,
         };
     });
-       
+
     return {
         start: cost.ResultsByTime[0].TimePeriod.Start,
         end: cost.ResultsByTime[0].TimePeriod.End,
@@ -135,7 +135,7 @@ exports.handler = async () => {
         const aliases = await iam.listAccountAliases({}).promise();
         const accountName = aliases.AccountAliases.join(', ');
 
-        const {start, end, total, totalJpy, fields} = await getUnblendedCost(account.AccessKeyId, account.SecretAccessKey);
+        const { start, end, total, totalJpy, fields } = await getUnblendedCost(account.AccessKeyId, account.SecretAccessKey);
         const text = `${accountName} @${start}〜${end}\n💰 ${totalJpy} ($${total})`;
 
         await sayToSlack(slackWebHookUrl, text, fields);
