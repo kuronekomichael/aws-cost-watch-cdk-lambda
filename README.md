@@ -45,7 +45,7 @@ cdk bootstrap --profile ${YOUR_AWS_PROFILE_NAME}
 
 Register to AWS Systems Manager(SSM)
 
-IAM Policy for cost watcher 
+IAM Policy for cost watcher
 ```
 {
     "Version": "2012-10-17",
@@ -123,6 +123,15 @@ If you don't use it, destroy everything.
 
 ```sh
 cdk destroy --profile ${YOUR_AWS_PROFILE_NAME}
+```
+
+## Run as the one-shot trial
+
+```sh
+export AWS_PROFILE=<your-configure-name>
+
+FUNCTION_NAME=`aws lambda list-functions | jq -r '.Functions[] | select(.Handler == "lifeguard.handler") | .FunctionName'`
+aws lambda invoke --function-name $FUNCTION_NAME /dev/null --log-type Tail --query 'LogResult' --output text | base64 -d
 ```
 
 ## References
