@@ -55,14 +55,14 @@ const getSlackWebHookFromSSM = async (ssm: any) => {
     return ssmSecureParam.Parameter.Value;
 };
 
-const getAccountsFromSSM = async (ssm: any) => {
+const getAccountsFromSSM = async (ssm: any): Promise<{[targetName: string]: {[key: string]: string}}> => {
     const ssmSecureParam = await ssm.getParametersByPath({
         Path: '/CreatedByCDK/AwsCostWatch/Targets',
         Recursive: true,
         WithDecryption: true,
     }).promise();
 
-    const accountsMap = ssmSecureParam.Parameters.reduce((accounts: any, parameter: any) => {
+    return ssmSecureParam.Parameters.reduce((accounts: any, parameter: any) => {
         const tokens = parameter.Name.split('/');
         const key = tokens.pop();
         const name = tokens.pop();
@@ -72,10 +72,6 @@ const getAccountsFromSSM = async (ssm: any) => {
 
         return accounts;
     }, {});
-
-    return Object.keys(accountsMap)
-        .sort()
-        .map(key => accountsMap[key]);
 };
 
 const getUnblendedCost = async (accessKeyId: string, secretAccessKey: string) => {
@@ -121,22 +117,31 @@ const getUnblendedCost = async (accessKeyId: string, secretAccessKey: string) =>
     };
 };
 
+const getAliasName = async (accessKeyId: string, secretAccessKey: string) => {
+    const iam = new IAM({
+        accessKeyId: accessKeyId,
+        secretAccessKey: secretAccessKey,
+    });
+
+    const aliases = await iam.listAccountAliases({}).promise();
+    const aliaseName = aliases.AccountAliases.join(', ');
+
+    return aliaseName ? aliaseName : undefined;
+};
+
 exports.handler = async () => {
 
     const ssm = new SSM();
     const slackWebHookUrl = await getSlackWebHookFromSSM(ssm);
-    const accounts: Array<any> = await getAccountsFromSSM(ssm);
+    const accountMap: {[key:string]: {[key:string]: string}} = await getAccountsFromSSM(ssm);
 
-    for (const account of accounts) {
-        const iam = new IAM({
-            accessKeyId: account.AccessKeyId,
-            secretAccessKey: account.SecretAccessKey,
-        });
-        const aliases = await iam.listAccountAliases({}).promise();
-        const accountName = aliases.AccountAliases.join(', ');
+    for (const targetName of Object.keys(accountMap).sort()) {
+        const account = accountMap[targetName];
+
+        const label = await getAliasName(account.AccessKeyId, account.SecretAccessKey);
 
         const { start, end, total, totalJpy, fields } = await getUnblendedCost(account.AccessKeyId, account.SecretAccessKey);
-        const text = `${accountName} @${start}〜${end}\n💰 ${totalJpy} ($${total})`;
+        const text = `${label ?? targetName} @${start}〜${end}\n💰 ${totalJpy} ($${total})`;
 
         await sayToSlack(slackWebHookUrl, text, fields);
     }
