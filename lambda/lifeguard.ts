@@ -3,6 +3,9 @@ import * as  url from 'url';
 import { CostExplorer, SSM, IAM } from 'aws-sdk';
 import { Convert } from 'easy-currencies';
 
+const SSM_PATH_SLACK_WEBHOOK_URL = '/CreatedByCDK/AwsCostWatch/SlackWebHookUrl';
+const SSM_PATH_TARGETS = '/CreatedByCDK/AwsCostWatch/Targets';
+
 /**
  * Attaches callbacks for the resolution and/or rejection of the Promise.
  * @param value The callback to execute when the Promise is resolved.
@@ -20,9 +23,9 @@ const getCurrencyJp = async (value: number, unit: string): Promise<string> => {
     return formatter.format(jpy);
 }
 
-const sayToSlack = async (slackWebHookUrl: string, pretext: string, fields: any[]) => {
+const sayToSlack = async (slackWebhookUrl: string, pretext: string, fields: any[]) => {
 
-    const parsedUrl = url.parse(slackWebHookUrl);
+    const parsedUrl = url.parse(slackWebhookUrl);
 
     const param = {
         hostname: parsedUrl.host,
@@ -49,20 +52,22 @@ const sayToSlack = async (slackWebHookUrl: string, pretext: string, fields: any[
 
 const getSlackWebHookFromSSM = async (ssm: any) => {
     const ssmSecureParam = await ssm.getParameter({
-        Name: '/CreatedByCDK/AwsCostWatch/SlackWebHookUrl',
+        Name: SSM_PATH_SLACK_WEBHOOK_URL,
         WithDecryption: true,
     }).promise();
-    return ssmSecureParam.Parameter.Value;
+    const slackWebhookUrl = ssmSecureParam.Parameter?.Value;
+    if (!slackWebhookUrl) throw new Error(`Cannot found slack Webhook URL "${SSM_PATH_SLACK_WEBHOOK_URL}" in SSM`);
+    return slackWebhookUrl;
 };
 
-const getAccountsFromSSM = async (ssm: any): Promise<{[targetName: string]: {[key: string]: string}}> => {
+const getAccountsFromSSM = async (ssm: SSM): Promise<{[targetName: string]: {[key: string]: string}}> => {
     const ssmSecureParam = await ssm.getParametersByPath({
-        Path: '/CreatedByCDK/AwsCostWatch/Targets',
+        Path: SSM_PATH_TARGETS,
         Recursive: true,
         WithDecryption: true,
     }).promise();
 
-    return ssmSecureParam.Parameters.reduce((accounts: any, parameter: any) => {
+    return ssmSecureParam.Parameters!.reduce((accounts: any, parameter: any) => {
         const tokens = parameter.Name.split('/');
         const key = tokens.pop();
         const name = tokens.pop();
@@ -93,24 +98,23 @@ const getUnblendedCost = async (accessKeyId: string, secretAccessKey: string) =>
         }],
     };
 
-    const cost: any = await costExplorer.getCostAndUsage(param).promise();
+    const cost = await costExplorer.getCostAndUsage(param).promise();
+    const costs = cost.ResultsByTime![0].Groups!.filter((group: any) => group.Metrics.UnblendedCost.Amount > 0);
 
-    const costs = cost.ResultsByTime[0].Groups.filter((group: any) => group.Metrics.UnblendedCost.Amount > 0);
-
-    const total = costs.reduce((total: number, group: any) => total + parseFloat(group.Metrics.UnblendedCost.Amount), 0)
-    const totalJpy: string = await getCurrencyJp(total, costs[0].Metrics.UnblendedCost.Unit);
+    const total = costs.reduce((total, group: any) => total + parseFloat(group.Metrics.UnblendedCost.Amount), 0)
+    const totalJpy: string = await getCurrencyJp(total, costs[0].Metrics!.UnblendedCost.Unit!);
 
     const jpyList = await Promise.all(costs.map((group: any) => getCurrencyJp(parseFloat(group.Metrics.UnblendedCost.Amount), group.Metrics.UnblendedCost.Unit)));
-    const fields = jpyList.map((jpy: any, index: number) => {
+    const fields = jpyList.map((jpy, index: number) => {
         return {
-            title: `${costs[index].Keys.join(', ')}`,
-            value: `${jpy} ($${costs[index].Metrics.UnblendedCost.Amount})`,
+            title: `${costs[index].Keys!.join(', ')}`,
+            value: `${jpy} ($${costs[index].Metrics!.UnblendedCost.Amount})`,
         };
     });
 
     return {
-        start: cost.ResultsByTime[0].TimePeriod.Start,
-        end: cost.ResultsByTime[0].TimePeriod.End,
+        start: cost.ResultsByTime![0].TimePeriod!.Start,
+        end: cost.ResultsByTime![0].TimePeriod!.End,
         total,
         totalJpy,
         fields
@@ -122,7 +126,6 @@ const getAliasName = async (accessKeyId: string, secretAccessKey: string) => {
         accessKeyId: accessKeyId,
         secretAccessKey: secretAccessKey,
     });
-
     const aliases = await iam.listAccountAliases({}).promise();
     const aliaseName = aliases.AccountAliases.join(', ');
 
@@ -130,19 +133,22 @@ const getAliasName = async (accessKeyId: string, secretAccessKey: string) => {
 };
 
 exports.handler = async () => {
-
     const ssm = new SSM();
-    const slackWebHookUrl = await getSlackWebHookFromSSM(ssm);
+    const slackWebhookUrl = await getSlackWebHookFromSSM(ssm);
     const accountMap: {[key:string]: {[key:string]: string}} = await getAccountsFromSSM(ssm);
 
-    for (const targetName of Object.keys(accountMap).sort()) {
+    const promises = Object.keys(accountMap).map(async (targetName) => {
         const account = accountMap[targetName];
-
         const label = await getAliasName(account.AccessKeyId, account.SecretAccessKey);
-
         const { start, end, total, totalJpy, fields } = await getUnblendedCost(account.AccessKeyId, account.SecretAccessKey);
-        const text = `${label ?? targetName} @${start}〜${end}\n💰 ${totalJpy} ($${total})`;
+        return {
+            text: `${label ?? targetName} @${start}〜${end}\n💰 ${totalJpy} ($${total})`,
+            fields,
+        }
+    })
 
-        await sayToSlack(slackWebHookUrl, text, fields);
+    const results = await Promise.all(promises);
+    for (const {text, fields} of results) {
+        await sayToSlack(slackWebhookUrl, text, fields);
     }
 };
