@@ -60,14 +60,15 @@ const getSlackWebHookFromSSM = async (ssm: any) => {
     return slackWebhookUrl;
 };
 
-const getAccountsFromSSM = async (ssm: SSM): Promise<{[targetName: string]: {[key: string]: string}}> => {
+const getAccountsFromSSM = async (ssm: SSM, accountMap: {[targetName: string]: {[key: string]: string}} = {}, nextToken?: string): Promise<{[targetName: string]: {[key: string]: string}}> => {
     const ssmSecureParam = await ssm.getParametersByPath({
         Path: SSM_PATH_TARGETS,
         Recursive: true,
         WithDecryption: true,
+        NextToken: nextToken,
     }).promise();
 
-    return ssmSecureParam.Parameters!.reduce((accounts: any, parameter: any) => {
+    const results = ssmSecureParam.Parameters!.reduce((accounts: any, parameter: any) => {
         const tokens = parameter.Name.split('/');
         const key = tokens.pop();
         const name = tokens.pop();
@@ -76,7 +77,9 @@ const getAccountsFromSSM = async (ssm: SSM): Promise<{[targetName: string]: {[ke
         accounts[name][key] = parameter.Value;
 
         return accounts;
-    }, {});
+    }, accountMap);
+
+    return ssmSecureParam.NextToken ? await getAccountsFromSSM(ssm, results, ssmSecureParam.NextToken) : results;
 };
 
 const getUnblendedCost = async (accessKeyId: string, secretAccessKey: string) => {
